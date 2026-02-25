@@ -3,12 +3,12 @@ const mockData = {
   riskLevel: "high",
   injuredJoints: [
     {
-      name: "Femur",
-      side: "Left Leg",
+      name: "Rib Cage",
+      side: "Right Side",
       coordinates: { x: 0.1, y: 0.5, z: 0.15 },
       description:
-        "High impact stress detected on the lower femur. Risk of stress fracture elevated after repeated sprints.",
-    },
+        "Contusion detected on lower right ribs following collision event in match 41.",
+      },
     {
       name: "Tibia",
       side: "Left Leg",
@@ -17,11 +17,11 @@ const mockData = {
         "Repetitive strain on the tibial shaft. Shin splint indicators present — recommend reduced training load.",
     },
     {
-      name: "Rib Cage",
+      name: "Femur",
       side: "Right side",
-      coordinates: { x: -0.18, y: -0.55, z: 0.05 },
+      coordinates: { x: -0.12, y: -0.55, z: 0.05 },
       description:
-        "Contusion detected on lower right ribs following collision event in match 41.",
+        "High impact stress detected on the lower femur. Risk of stress fracture elevated after repeated sprints.",
     },
   ],
   playerMetrics: {

@@ -139,7 +139,7 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
       {/* ── Header ─────────────────────────────────────────── */}
       <div data-animate className="flex items-baseline justify-between">
         <h1 className="text-3xl font-heading">
-          OSTEO<span style={{ color: ACCENT }}>/</span>AI
+          <span style={{ color: ACCENT }}></span>AI
         </h1>
         <span className="text-md font-sans  tracking-widest text-white/50 uppercase">
           v2.1.0
@@ -201,7 +201,7 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
             {data.riskLevel}
           </span>
         </div>
-        <div className="h-1 bg-white/24 overflow-hidden">
+        <div className="h-5  bg-white/24 overflow-hidden">
           <div
             ref={riskBarRef}
             className="h-full"
@@ -268,16 +268,16 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
       {/* ── Biometrics grid ────────────────────────────────── */}
       <div data-animate>
         <div className="h-px bg-white/5 mb-4" />
-        <span className="text-lg tracking-wider  text-white/75 uppercase block mb-3">
+        <span className="text-lg   text-white/75 uppercase block mb-3">
           Biometrics
         </span>
         <div className="grid grid-cols-3 gap-2">
           {metrics.map((m, i) => (
             <div key={i} className="border border-white/5 bg-white/2 p-3">
-              <div className="text-5xl  uppercase  text-white/75 font-heading mb-1">
+              <div className="text-6xl  uppercase  text-white/75 font-heading mb-1">
                 {m.value}
               </div>
-              <div className="text-md tracking-wider text-white/20 uppercase">
+              <div className="text-md  text-white/50 uppercase">
                 {m.label}
               </div>
             </div>
@@ -289,10 +289,10 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
       <div data-animate className="mt-auto pt-4">
         <div className="h-px bg-white/5 mb-4" />
         <div className="flex items-center justify-between">
-          <span className="text-xs text-white/15 tracking-wider">
-            OSTEO/AI PREDICTIVE ENGINE
+          <span className="text-xl text-white/80 font-heading">
+            AI PREDICTIVE ENGINE
           </span>
-          <span className="text-xs text-white/10 font-heading">
+          <span className="text-xl tracking-wide text-white/80 font-heading">
             BUILD 2026.02
           </span>
         </div>

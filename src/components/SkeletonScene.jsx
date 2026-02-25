@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, Center } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette, Noise, ChromaticAberration } from "@react-three/postprocessing";
 import * as THREE from "three";
 import { Model } from "./Skull";
 import InjuryHotspot from "./InjuryHotspot";
@@ -37,7 +38,7 @@ export default function SkeletonScene({ injuredJoints = [], riskColor = "#39FF14
       gl={{
         antialias: true,
         toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.1,
+        toneMappingExposure: 1.,
       }}
     >
       <color attach="background" args={["#0a0a0a"]} />
@@ -73,15 +74,15 @@ export default function SkeletonScene({ injuredJoints = [], riskColor = "#39FF14
         />
       ))}
 
-      <Grid
-        position={[0, -0.5, 0]}
+        <Grid
+        position={[0, -1.05, 0]}
         infiniteGrid
         cellSize={0.5}
-        cellThickness={0.4}
-        cellColor="#161616"
+        cellThickness={0.6}
+        cellColor="#bbbbbb88" // Darker white for cell lines with reduced opacity
         sectionSize={2}
-        sectionThickness={0.8}
-        sectionColor="#1f1f1f"
+        sectionThickness={1}
+        sectionColor="#bbbbbb55" // Darker white for section lines with reduced opacity
         fadeDistance={10}
         fadeStrength={1.5}
       />
@@ -96,6 +97,23 @@ export default function SkeletonScene({ injuredJoints = [], riskColor = "#39FF14
         autoRotate={!isInteracting}
         autoRotateSpeed={0.3}
       />
+      
+      <EffectComposer>
+        <Bloom 
+          luminanceThreshold={0.2} 
+          luminanceSmoothing={0.9} 
+          height={300} 
+          intensity={0.5} 
+          mipmapBlur={true}
+        />
+        {/* <ChromaticAberration
+          offset={[0.01, 0.002]} // RGB shift offset
+          radialModulation={true} // Higher intensity at edges
+          modulationOffset={0.5} // Center area unaffected
+        /> */}
+        {/* <Noise opacity={0.02} /> */}
+        <Vignette eskil={false} offset={0.1} darkness={1.1} />
+      </EffectComposer>
     </Canvas>
   );
 }
