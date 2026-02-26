@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import SkeletonScene from "./components/SkeletonScene";
 import Dashboard from "./components/Dashboard";
 import mockData from "./data/mockData";
@@ -21,7 +22,27 @@ function App() {
   const riskColor = getRiskColor(data.riskLevel);
 
   return (
-    <div className="w-full h-full flex">
+    <div className="w-full h-full flex relative">
+      {/* Nav link to DataCapture */}
+      <Link
+        to="/datacapture"
+        className="absolute top-4 right-4 px-4 py-2 border text-lg bg-black z-90 uppercase tracking-widest font-heading transition-all duration-300"
+        style={{
+          borderColor: "rgba(57,255,20,0.27)",
+          color: "#39ff14",
+          background: "rgba(57,255,20,0.03)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(57,255,20,0.1)";
+          e.currentTarget.style.borderColor = "rgba(57,255,20,0.53)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(57,255,20,0.03)";
+          e.currentTarget.style.borderColor = "rgba(57,255,20,0.27)";
+        }}
+      >
+        Data Capture →
+      </Link>
       <div className="w-[60%] h-full">
         <SkeletonScene injuredJoints={data.injuredJoints} riskColor={riskColor} />
       </div>
