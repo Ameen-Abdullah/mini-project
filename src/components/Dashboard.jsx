@@ -1,5 +1,8 @@
-import { useRef, useLayoutEffect } from "react";
+import { useRef, useLayoutEffect, useMemo } from "react";
 import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+gsap.registerPlugin(ScrollTrigger);
 
 /* ------------------------------------------------------------------ */
 /*  Cubic-bezier(0.5, 0, 0, 1) implemented as a GSAP-compatible ease */
@@ -63,6 +66,28 @@ function riskMeta(level) {
   }
 }
 
+/* Parse metric value into number (for animation) and optional suffix (e.g. "85%" → 85, "%") */
+function parseMetricValue(value) {
+  if (typeof value === "number" && !Number.isNaN(value)) {
+    return { num: value, suffix: "" };
+  }
+  const s = String(value).trim();
+  const match = s.match(/^([-\d.]+)\s*(.*)$/);
+  if (match) {
+    const num = parseFloat(match[1]);
+    return Number.isNaN(num) ? { num: null, suffix: s } : { num, suffix: match[2] || "" };
+  }
+  return { num: null, suffix: s };
+}
+
+function formatAnimatedValue(val, parsed) {
+  if (parsed.suffix && parsed.num === null) return parsed.suffix;
+  const n = parsed.num;
+  const display =
+    n !== null && Number.isInteger(n) ? Math.round(val) : Number(val).toFixed(1);
+  return parsed.suffix ? `${display}${parsed.suffix}` : display;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Dashboard                                                         */
 /* ------------------------------------------------------------------ */
@@ -70,6 +95,8 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
   const ACCENT = riskColor;
   const containerRef = useRef(null);
   const riskBarRef = useRef(null);
+  const biometricsSectionRef = useRef(null);
+  const metricValueRefs = useRef([]);
 
   const risk = riskMeta(data.riskLevel);
   const status = STATUS_MAP[data.serverStatus] ?? STATUS_MAP[500];
@@ -80,14 +107,18 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
     hour12: false,
   });
 
-  const metrics = [
-    { value: data.playerMetrics.fatigueLevel, label: "FATIGUE" },
-    { value: data.playerMetrics.recentImpactForce, label: "IMPACT" },
-    { value: data.playerMetrics.heartRate, label: "HEART RATE" },
-    { value: data.playerMetrics.sprintDistance, label: "SPRINT DIST." },
-    { value: String(data.playerMetrics.matchesPlayed), label: "MATCHES" },
-    { value: data.playerMetrics.trainingLoad, label: "TR. LOAD" },
-  ];
+  const metrics = useMemo(
+    () =>
+      [
+        { value: data.playerMetrics.fatigueLevel, label: "FATIGUE" },
+        { value: data.playerMetrics.recentImpactForce, label: "IMPACT" },
+        { value: data.playerMetrics.heartRate, label: "HEART RATE" },
+        { value: data.playerMetrics.sprintDistance, label: "SPRINT DIST." },
+        { value: String(data.playerMetrics.matchesPlayed), label: "MATCHES" },
+        { value: data.playerMetrics.trainingLoad, label: "TR. LOAD" },
+      ].map((m) => ({ ...m, parsed: parseMetricValue(m.value) })),
+    [data]
+  );
 
   /* ---- GSAP entry animations ---- */
   useLayoutEffect(() => {
@@ -128,6 +159,57 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
 
     return () => ctx.revert();
   }, [risk.pct]);
+
+  /* ---- Biometrics count-up when section scrolls into view ---- */
+  useLayoutEffect(() => {
+    const section = biometricsSectionRef.current;
+    const scroller = containerRef.current;
+    if (!section || !scroller || !metrics.length) return;
+
+    const valueRefs = metricValueRefs.current;
+    const fromVals = {};
+    const toVals = {};
+    metrics.forEach((_, i) => {
+      fromVals[`v${i}`] = 0;
+      toVals[`v${i}`] = metrics[i].parsed.num ?? 0;
+    });
+
+    const ctx = gsap.context(() => {
+      const tween = gsap.to(fromVals, {
+        ...toVals,
+        duration: 1.4,
+        ease: customEase,
+        paused: true,
+        onUpdate: () => {
+          metrics.forEach((m, i) => {
+            const el = valueRefs[i];
+            if (el) {
+              el.textContent = formatAnimatedValue(fromVals[`v${i}`], m.parsed);
+            }
+          });
+        },
+      });
+
+      ScrollTrigger.create({
+        trigger: section,
+        scroller,
+        start: "top 90%",
+        once: true,
+        onEnter: () => tween.play(),
+      });
+
+      // If section is already in view on load (e.g. after refresh), play immediately
+      requestAnimationFrame(() => {
+        ScrollTrigger.refresh();
+        const scrollTop = scroller.scrollTop;
+        const sectionTop = section.offsetTop;
+        const viewportH = scroller.clientHeight;
+        if (sectionTop - scrollTop < viewportH * 0.9) tween.play();
+      });
+    }, scroller);
+
+    return () => ctx.revert();
+  }, [metrics]);
 
   /* ---- Render ---- */
   return (
@@ -266,7 +348,7 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
       </div>
 
       {/* ── Biometrics grid ────────────────────────────────── */}
-      <div data-animate>
+      <div ref={biometricsSectionRef} data-animate>
         <div className="h-px bg-white/5 mb-4" />
         <span className="text-lg   text-white/75 uppercase block mb-3">
           Biometrics
@@ -274,8 +356,11 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
         <div className="grid grid-cols-3 gap-2">
           {metrics.map((m, i) => (
             <div key={i} className="border border-white/5 bg-white/2 p-3">
-              <div className="text-6xl  uppercase  text-white/75 font-heading mb-1">
-                {m.value}
+              <div
+                ref={(el) => (metricValueRefs.current[i] = el)}
+                className="text-6xl  uppercase  text-white/75 font-heading mb-1"
+              >
+                0
               </div>
               <div className="text-md  text-white/50 uppercase">
                 {m.label}

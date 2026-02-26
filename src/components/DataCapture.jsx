@@ -218,6 +218,10 @@ export default function DataCapture() {
             const lx = nose.x * canvas.width;
             const ly = nose.y * canvas.height - 24;
             ctx.save();
+            /* Un-flip label so it reads correctly when canvas has CSS scaleX(-1) */
+            ctx.translate(lx, ly);
+            ctx.scale(-1, 1);
+            ctx.translate(-lx, -ly);
             ctx.font = "bold 13px 'Helvetica', sans-serif";
             ctx.textAlign = "center";
 
