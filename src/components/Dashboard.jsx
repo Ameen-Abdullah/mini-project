@@ -304,47 +304,83 @@ export default function Dashboard({ data, riskColor = "#39FF14" }) {
           </span>
         </div>
 
-        <div className="flex flex-col gap-2">
+        <ol className="flex flex-col gap-3 list-none p-0 m-0">
           {data.injuredJoints.map((joint, i) => (
-            <div
+            <li
               key={i}
-              className="border border-white/5 bg-white/2 p-4 backdrop-blur-sm"
+              className="group border border-white/5 bg-white/2 rounded-sm overflow-hidden backdrop-blur-sm"
               style={{
-                transition: "all 0.3s cubic-bezier(0.5, 0, 0, 1)",
+                transition: "border-color 0.25s ease, background 0.25s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = `${ACCENT}26`; // 15% opacity
-                e.currentTarget.style.background = `${ACCENT}08`; // 3% opacity
+                e.currentTarget.style.borderColor = `${ACCENT}40`;
+                e.currentTarget.style.background = `${ACCENT}0d`;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = "rgba(255,255,255,0.05)";
                 e.currentTarget.style.background = "rgba(255,255,255,0.02)";
               }}
             >
-              <div className="flex items-center gap-2 mb-2">
-                <span
-                  className="text-6xl font-heading"
-                  style={{ color: ACCENT, textShadow: `0 0 12px ${ACCENT}55` }}
+              <div className="flex gap-0 min-h-px">
+                {/* Index rail — sequence, not competing with title */}
+                <div
+                  className="flex flex-col items-center shrink-0 w-14 sm:w-16 py-4 px-2 border-r border-white/5"
+                  style={{ background: `${ACCENT}08` }}
                 >
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span
-                  className="block w-1 h-1 shrink-0"
-                  style={{ background: ACCENT }}
-                />
-                <span className="text-xl font-bold uppercase text-white/75">
-                  {joint.name}
-                </span>
-                <span className="text-md text-white/50  uppercase ml-auto">
-                  {"(" + joint.side + ")"}
-                </span>
+                  <span
+                    className="text-[10px] font-sans uppercase tracking-[0.2em] text-white/35 mb-1"
+                  >
+                    No.
+                  </span>
+                  <span
+                    className="text-6xl font-heading tabular-nums leading-none"
+                    style={{
+                      color: ACCENT,
+                      textShadow: `0 0 14px ${ACCENT}44`,
+                    }}
+                  >
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                </div>
+
+                <div className="flex-1 min-w-0 p-4 pl-4 sm:pl-5 flex flex-col gap-3">
+                  {/* Level 1: joint name (primary) */}
+                  <div className="space-y-2">
+                    <h3 className="text-5xl font-heading uppercase tracking-wide text-white leading-tight">
+                      {joint.name}
+                    </h3>
+                    {/* Level 2: laterality / meta */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-flex items-center text-[11px] font-sans font-semibold uppercase tracking-widest px-2.5 py-1 rounded-sm border"
+                        style={{
+                          borderColor: `${ACCENT}55`,
+                          color: ACCENT,
+                          background: `${ACCENT}12`,
+                        }}
+                      >
+                        {joint.side}
+                      </span>
+                      <span className="text-[10px] font-sans uppercase tracking-widest text-white/30">
+                        Affected site
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Level 3: clinical / description */}
+                  <div className="pt-1 border-t border-white/5">
+                    <span className="text-[10px] font-sans uppercase tracking-[0.15em] text-white/35 block mb-1.5">
+                      Assessment
+                    </span>
+                    <p className="text-sm sm:text-[15px] leading-relaxed text-white/72 font-sans max-w-prose">
+                      {joint.description}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p className="text-md leading-relaxed text-white/80 pl-7">
-                {joint.description}
-              </p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
       </div>
 
       {/* ── Biometrics grid ────────────────────────────────── */}
