@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+
 @font-face {
   font-family: "Hakobi";
   src: url("/hakobi-condensed.woff") format("woff");

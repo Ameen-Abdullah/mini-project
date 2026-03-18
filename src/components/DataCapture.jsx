@@ -56,7 +56,7 @@ function calcAngle(a, b, c) {
   return (Math.acos(Math.max(-1, Math.min(1, dot / mag))) * 180) / Math.PI;
 }
 
-function classifyFootballMovement(lm) {
+function classifyFootballMovement(lm, prevLm) {
   if (!lm || lm.length < 33) return null;
 
   const nose      = lm[0];
@@ -77,6 +77,23 @@ function classifyFootballMovement(lm) {
   const rAnkleRelY = rAnkle.y - hipMidY;
   const avgKneeAngle = (lKneeAngle + rKneeAngle) / 2;
   const trunkLean  = Math.abs(shoulderMidX - hipMidX);
+
+  /* ---- Temporal motion features (frame-to-frame) ---- */
+  let hipRise = 0;
+  let noseRise = 0;
+  let ankleRise = 0;
+  if (prevLm && prevLm.length >= 33) {
+    const prevNose = prevLm[0];
+    const prevLHip = prevLm[23], prevRHip = prevLm[24];
+    const prevLAnkle = prevLm[27], prevRAnkle = prevLm[28];
+    const prevHipMidY = (prevLHip.y + prevRHip.y) / 2;
+    const prevAnkleAvgY = (prevLAnkle.y + prevRAnkle.y) / 2;
+    const currAnkleAvgY = (lAnkle.y + rAnkle.y) / 2;
+
+    hipRise = prevHipMidY - hipMidY;
+    noseRise = prevNose.y - nose.y;
+    ankleRise = prevAnkleAvgY - currAnkleAvgY;
+  }
 
   /* ---- Risk Pattern Detection ---- */
   const risks = [];
@@ -111,9 +128,14 @@ function classifyFootballMovement(lm) {
   if (Math.abs(nose.y - lAnkle.y) < 0.2 || Math.abs(nose.y - rAnkle.y) < 0.2) {
     action = "FALLEN / PRONE";
     confidence = 0.88;
-  } else if (lAnkleRelY < 0.05 && rAnkleRelY < 0.05) {
+  } else if (
+    hipRise > 0.012 &&
+    noseRise > 0.014 &&
+    ankleRise > 0.01 &&
+    avgKneeAngle > 130
+  ) {
     action = "JUMPING";
-    confidence = 0.87;
+    confidence = 0.9;
   } else if (lAnkleRelY < 0.12) {
     action = "LEFT LEG KICK";
     confidence = 0.83;
@@ -178,18 +200,27 @@ export default function DataCapture() {
   const videoRef         = useRef(null);
   const canvasRef        = useRef(null);
   const containerRef     = useRef(null);
+  const fileInputRef     = useRef(null);
   const poseLandmarkerRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const prevLandmarksRef   = useRef([]);
+  const lastVideoTimeRef   = useRef(-1);
+  const lastActionsRef     = useRef([]);
+  const uploadedUrlRef     = useRef(null);
+  const sessionStartRef    = useRef(performance.now());
 
   const [allLandmarks, setAllLandmarks]           = useState([]);
   const [allWorldLandmarks, setAllWorldLandmarks] = useState([]);
   const [poseCount, setPoseCount]                 = useState(0);
   const [isLoading, setIsLoading]                 = useState(true);
   const [isStreaming, setIsStreaming]              = useState(false);
+  const [sourceMode, setSourceMode]               = useState("camera");
+  const [sourceLabel, setSourceLabel]             = useState("Live Camera");
   const [error, setError]                         = useState(null);
   const [selectedGroup, setSelectedGroup]         = useState(null);
   const [selectedPerson, setSelectedPerson]       = useState(0);
   const [fps, setFps]                             = useState(0);
+  const [actionFeed, setActionFeed]               = useState([]);
 
   /* Movement analysis state */
   const [movementData, setMovementData] = useState([]);
@@ -261,12 +292,23 @@ export default function DataCapture() {
   }, []);
 
   /* ---- Start / Stop camera ---- */
-  const startCamera = useCallback(async () => {
+  const startCamera = async () => {
+    if (isLoading || !poseLandmarkerRef.current) {
+      setError("Model is still loading. Please wait before starting capture.");
+      return;
+    }
+
+    stopCamera();
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" },
       });
       if (videoRef.current) {
+        setSourceMode("camera");
+        setSourceLabel("Live Camera");
+        setError(null);
+        sessionStartRef.current = performance.now();
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         setIsStreaming(true);
@@ -275,26 +317,108 @@ export default function DataCapture() {
       setError("Camera access denied. Please allow camera permissions.");
       console.error(err);
     }
-  }, []);
+  };
 
   const stopCamera = useCallback(() => {
     if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
       videoRef.current.srcObject = null;
     }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.removeAttribute("src");
+      videoRef.current.load();
+    }
+    if (uploadedUrlRef.current) {
+      URL.revokeObjectURL(uploadedUrlRef.current);
+      uploadedUrlRef.current = null;
+    }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
     setIsStreaming(false);
+    setSourceMode("camera");
+    setSourceLabel("Live Camera");
     setAllLandmarks([]);
     setAllWorldLandmarks([]);
     setPoseCount(0);
+    setFps(0);
     setSelectedPerson(0);
     setMovementData([]);
+    setActionFeed([]);
+    prevLandmarksRef.current = [];
+    lastActionsRef.current = [];
+    lastVideoTimeRef.current = -1;
+    sessionStartRef.current = performance.now();
+    frameCountRef.current = 0;
+    lastTimeRef.current = performance.now();
     statsRef.current = { framesAnalyzed: 0, riskEventFrames: 0, peakPlayerCount: 0, actionCounts: {} };
     setSessionStats({ framesAnalyzed: 0, riskEventFrames: 0, peakPlayerCount: 0, actionCounts: {} });
   }, []);
+
+  const handleVideoUpload = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (isLoading || !poseLandmarkerRef.current) {
+      setError("Model is still loading. Please wait before uploading a video.");
+      return;
+    }
+
+    if (!file.type.startsWith("video/")) {
+      setError("Please select a valid video file.");
+      return;
+    }
+
+    stopCamera();
+    const video = videoRef.current;
+    if (!video) return;
+
+    const fileUrl = URL.createObjectURL(file);
+    uploadedUrlRef.current = fileUrl;
+    setSourceMode("upload");
+    setSourceLabel(file.name);
+    setError(null);
+    sessionStartRef.current = performance.now();
+
+    try {
+      video.srcObject = null;
+      video.src = fileUrl;
+      video.muted = true;
+      video.loop = false;
+      await video.play();
+      setIsStreaming(true);
+    } catch (err) {
+      setError("Unable to play the uploaded video.");
+      console.error(err);
+    }
+  }, [isLoading, stopCamera]);
+
+  const replayUploadedVideo = useCallback(async () => {
+    if (sourceMode !== "upload") return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      if (video.ended || video.currentTime >= Math.max(0, (video.duration || 0) - 0.05)) {
+        video.currentTime = 0;
+      }
+      prevLandmarksRef.current = [];
+      lastActionsRef.current = [];
+      lastVideoTimeRef.current = -1;
+      frameCountRef.current = 0;
+      lastTimeRef.current = performance.now();
+      sessionStartRef.current = performance.now();
+      await video.play();
+      setIsStreaming(true);
+      setError(null);
+    } catch (err) {
+      setError("Unable to replay video.");
+      console.error(err);
+    }
+  }, [sourceMode]);
 
   /* ---- Detection loop ---- */
   useEffect(() => {
@@ -303,6 +427,7 @@ export default function DataCapture() {
     const video  = videoRef.current;
     const canvas = canvasRef.current;
     const ctx    = canvas?.getContext("2d");
+    const isMirrored = sourceMode === "camera";
 
     function detect() {
       if (!video || video.readyState < 2) {
@@ -310,10 +435,26 @@ export default function DataCapture() {
         return;
       }
 
+      if (sourceMode === "upload") {
+        if (video.ended) {
+          setIsStreaming(false);
+          return;
+        }
+        if (video.paused) {
+          animationFrameRef.current = requestAnimationFrame(detect);
+          return;
+        }
+        if (Math.abs(video.currentTime - lastVideoTimeRef.current) < 1e-4) {
+          animationFrameRef.current = requestAnimationFrame(detect);
+          return;
+        }
+        lastVideoTimeRef.current = video.currentTime;
+      }
+
       canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
 
-      const now    = performance.now();
+      const now = performance.now();
       const result = poseLandmarkerRef.current.detectForVideo(video, now);
 
       /* FPS counter */
@@ -330,10 +471,43 @@ export default function DataCapture() {
 
       if (numDetected > 0) {
         const drawingUtils = new DrawingUtils(ctx);
+        const prevLandmarks = prevLandmarksRef.current;
 
         /* Classify movements for each detected person */
-        const newMovementData = result.landmarks.map((lm) =>
-          classifyFootballMovement(lm)
+        const newMovementData = result.landmarks.map((lm, i) =>
+          classifyFootballMovement(lm, prevLandmarks[i])
+        );
+
+        const eventTimeSec = sourceMode === "upload"
+          ? video.currentTime
+          : (performance.now() - sessionStartRef.current) / 1000;
+        const actionEvents = [];
+        newMovementData.forEach((mv, i) => {
+          if (!mv?.action) return;
+          const lastAction = lastActionsRef.current[i];
+          if (lastAction !== mv.action) {
+            const cfg = ACTION_CONFIG[mv.action] ?? ACTION_CONFIG["IN MOTION"];
+            actionEvents.push({
+              id: `${eventTimeSec.toFixed(3)}-${i}-${mv.action}`,
+              time: eventTimeSec,
+              player: PERSON_COLORS[i % PERSON_COLORS.length].label,
+              action: mv.action,
+              icon: cfg.icon,
+              color: cfg.color,
+            });
+            lastActionsRef.current[i] = mv.action;
+          }
+        });
+        if (lastActionsRef.current.length > numDetected) {
+          lastActionsRef.current = lastActionsRef.current.slice(0, numDetected);
+        }
+        if (actionEvents.length > 0) {
+          setActionFeed((prev) => [...prev, ...actionEvents].slice(-120));
+        }
+
+        /* Save current frame for next-frame temporal detection */
+        prevLandmarksRef.current = result.landmarks.map((lm) =>
+          lm.map((p) => ({ ...p }))
         );
 
         /* Update session stats */
@@ -377,9 +551,11 @@ export default function DataCapture() {
             const ly = nose.y * canvas.height - 30;
 
             ctx.save();
-            ctx.translate(lx, ly);
-            ctx.scale(-1, 1);
-            ctx.translate(-lx, -ly);
+            if (isMirrored) {
+              ctx.translate(lx, ly);
+              ctx.scale(-1, 1);
+              ctx.translate(-lx, -ly);
+            }
             ctx.textAlign = "center";
 
             /* Player badge */
@@ -427,6 +603,8 @@ export default function DataCapture() {
         setAllWorldLandmarks([]);
         setPoseCount(0);
         setMovementData([]);
+        prevLandmarksRef.current = [];
+        lastActionsRef.current = [];
       }
 
       animationFrameRef.current = requestAnimationFrame(detect);
@@ -436,7 +614,7 @@ export default function DataCapture() {
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [isStreaming]);
+  }, [isStreaming, sourceMode]);
 
   /* ---- Cleanup on unmount ---- */
   useEffect(() => {
@@ -459,6 +637,12 @@ export default function DataCapture() {
   const personLabel    = PERSON_COLORS[safePerson % PERSON_COLORS.length].label;
   const currentMvData  = movementData[safePerson];
   const actionCfg      = ACTION_CONFIG[currentMvData?.action] ?? ACTION_CONFIG["IN MOTION"];
+  const formatTime = (seconds) => {
+    const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+    const mins = Math.floor(safe / 60);
+    const secs = (safe % 60).toFixed(2).padStart(5, "0");
+    return `${String(mins).padStart(2, "0")}:${secs}`;
+  };
 
   /* Top action for session stats */
   const topAction = Object.entries(sessionStats.actionCounts)
@@ -475,19 +659,42 @@ export default function DataCapture() {
       <div className="w-[60%] h-full relative flex items-center justify-center bg-black/50">
         <video
           ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ transform: "scaleX(-1)" }}
+          className="absolute inset-0 w-full h-full object-contain"
+          style={{ transform: sourceMode === "camera" ? "scaleX(-1)" : "none" }}
           playsInline
           muted
+          controls={sourceMode === "upload"}
+          onPlay={() => {
+            if (sourceMode === "upload" && poseLandmarkerRef.current) setIsStreaming(true);
+          }}
+          onEnded={() => {
+            if (sourceMode === "upload") {
+              setIsStreaming(false);
+              prevLandmarksRef.current = [];
+              lastActionsRef.current = [];
+              lastVideoTimeRef.current = -1;
+              if (videoRef.current) {
+                videoRef.current.currentTime = 0;
+              }
+            }
+          }}
         />
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ transform: "scaleX(-1)" }}
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          style={{ transform: sourceMode === "camera" ? "scaleX(-1)" : "none", pointerEvents: "none" }}
+        />
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          onChange={handleVideoUpload}
         />
 
         {/* Overlay controls */}
-        {!isStreaming && (
+        {!isStreaming && sourceMode !== "upload" && (
           <div className="relative z-10 flex flex-col items-center gap-4">
             {isLoading ? (
               <div data-animate className="text-center">
@@ -505,16 +712,28 @@ export default function DataCapture() {
                 <p className="text-sm text-white/50">{error}</p>
               </div>
             ) : (
-              <button
-                data-animate
-                onClick={startCamera}
-                className="px-8 py-3 border text-lg uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
-                style={{ borderColor: ACCENT + "44", color: ACCENT, background: ACCENT + "08" }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = ACCENT + "1a"; e.currentTarget.style.borderColor = ACCENT + "88"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = ACCENT + "08"; e.currentTarget.style.borderColor = ACCENT + "44"; }}
-              >
-                Start Capture
-              </button>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  data-animate
+                  onClick={startCamera}
+                  className="px-8 py-3 border text-lg uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
+                  style={{ borderColor: ACCENT + "44", color: ACCENT, background: ACCENT + "08" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = ACCENT + "1a"; e.currentTarget.style.borderColor = ACCENT + "88"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = ACCENT + "08"; e.currentTarget.style.borderColor = ACCENT + "44"; }}
+                >
+                  Start Live Capture
+                </button>
+                <button
+                  data-animate
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-8 py-3 border text-sm uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
+                  style={{ borderColor: "#00d4ff44", color: "#00d4ff", background: "#00d4ff08" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#00d4ff1a"; e.currentTarget.style.borderColor = "#00d4ff88"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#00d4ff08"; e.currentTarget.style.borderColor = "#00d4ff44"; }}
+                >
+                  Upload Video
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -531,7 +750,15 @@ export default function DataCapture() {
               }}
             />
             <span className="text-xs uppercase tracking-widest text-white/60 font-heading">
-              Live — {fps} FPS · {poseCount} {poseCount === 1 ? "player" : "players"}
+              {sourceMode === "upload" ? "Video" : "Live"} — {fps} FPS · {poseCount} {poseCount === 1 ? "player" : "players"}
+            </span>
+          </div>
+        )}
+
+        {isStreaming && (
+          <div className="absolute top-10 left-4 z-10">
+            <span className="text-[10px] uppercase tracking-widest text-white/45 font-heading">
+              Source: {sourceLabel}
             </span>
           </div>
         )}
@@ -539,7 +766,7 @@ export default function DataCapture() {
         {/* Movement overlay badge (top-right) */}
         {isStreaming && currentMvData && (
           <div
-            className="absolute top-4 right-4 z-10 px-3 py-1.5 border text-xs uppercase tracking-widest font-heading"
+            className={`absolute ${sourceMode === "upload" ? "top-32" : "top-4"} right-4 z-10 px-3 py-1.5 border text-xs uppercase tracking-widest font-heading`}
             style={{
               borderColor: actionCfg.color + "55",
               color: actionCfg.color,
@@ -551,7 +778,7 @@ export default function DataCapture() {
         )}
 
         {/* Stop button */}
-        {isStreaming && (
+        {isStreaming && sourceMode === "camera" && (
           <button
             onClick={stopCamera}
             className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 px-6 py-2 border text-sm uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
@@ -561,6 +788,38 @@ export default function DataCapture() {
           >
             Stop Capture
           </button>
+        )}
+
+        {sourceMode === "upload" && (
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-1.5 border text-[10px] uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
+              style={{ borderColor: "#00d4ff55", color: "#00d4ff", background: "#00d4ff10" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#00d4ff22"; e.currentTarget.style.borderColor = "#00d4ffaa"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#00d4ff10"; e.currentTarget.style.borderColor = "#00d4ff55"; }}
+            >
+              Reupload Video
+            </button>
+            <button
+              onClick={replayUploadedVideo}
+              className="px-3 py-1.5 border text-[10px] uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
+              style={{ borderColor: "#39ff1455", color: "#39ff14", background: "#39ff1410" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#39ff1422"; e.currentTarget.style.borderColor = "#39ff14aa"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#39ff1410"; e.currentTarget.style.borderColor = "#39ff1455"; }}
+            >
+              Replay
+            </button>
+            <button
+              onClick={stopCamera}
+              className="px-3 py-1.5 border text-[10px] uppercase tracking-widest font-heading transition-all duration-300 cursor-pointer"
+              style={{ borderColor: "#FF3B30" + "55", color: "#FF3B30", background: "#FF3B30" + "10" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#FF3B30" + "22"; e.currentTarget.style.borderColor = "#FF3B30" + "aa"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#FF3B30" + "10"; e.currentTarget.style.borderColor = "#FF3B30" + "55"; }}
+            >
+              Close Video
+            </button>
+          </div>
         )}
       </div>
 
@@ -604,7 +863,9 @@ export default function DataCapture() {
                   : "Standby"}
               </span>
             </div>
-            <span className="text-md text-white/75 font-sans">MediaPipe Pose</span>
+            <span className="text-md text-white/75 font-sans">
+              MediaPipe Pose · {sourceMode === "upload" ? "Video" : "Camera"}
+            </span>
           </div>
         </div>
 
@@ -991,6 +1252,45 @@ export default function DataCapture() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── Action Event Feed ─────────────────────────────── */}
+        {(actionFeed.length > 0 || isStreaming) && (
+          <div data-animate>
+            <div className="h-px bg-white/5 mb-4" />
+            <span className="text-xs font-sans text-white/75 uppercase block mb-3">
+              Detected Actions Timeline
+            </span>
+            {actionFeed.length === 0 ? (
+              <div className="border border-white/5 bg-white/2 p-3">
+                <span className="text-xs text-white/35 uppercase tracking-widest">
+                  Waiting for action changes…
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-1">
+                {[...actionFeed].reverse().slice(0, 18).map((evt) => (
+                  <div
+                    key={evt.id}
+                    className="border border-white/5 bg-white/2 px-3 py-2 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-heading shrink-0" style={{ color: evt.color }}>
+                        {evt.icon}
+                      </span>
+                      <span className="text-xs text-white/55 uppercase shrink-0">{evt.player}</span>
+                      <span className="text-xs font-heading uppercase truncate" style={{ color: evt.color }}>
+                        {evt.action}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-white/35 font-mono ml-2 shrink-0">
+                      {formatTime(evt.time)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
